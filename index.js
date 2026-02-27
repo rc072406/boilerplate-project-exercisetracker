@@ -6,18 +6,18 @@ const bodyParser = require('body-parser');
 
 const app = express();
 
-// Middleware
+
 app.use(cors());
 app.use(express.static('public'));
 app.use(bodyParser.urlencoded({ extended: false }));
 app.use(bodyParser.json());
 
-// Connect to MongoDB
+
 mongoose.connect(process.env.MONGO_URI)
   .then(() => console.log('MongoDB connected'))
   .catch(err => console.error(err));
 
-// Schemas
+
 const userSchema = new mongoose.Schema({
   username: { type: String, required: true }
 });
@@ -47,12 +47,11 @@ async function cleanFCCData() {
   }
 }
 
-// Routes
 app.get('/', (req, res) => {
   res.sendFile(__dirname + '/views/index.html');
 });
 
-// Create user
+
 app.post('/api/users', async (req, res) => {
   try {
     const { username } = req.body;
@@ -69,13 +68,13 @@ app.post('/api/users', async (req, res) => {
   }
 });
 
-// Get all users
+
 app.get('/api/users', async (req, res) => {
   const users = await User.find({}, 'username _id');
   res.json(users);
 });
 
-// Add exercise
+
 app.post('/api/users/:_id/exercises', async (req, res) => {
   try {
     const { description, duration, date } = req.body;
@@ -105,7 +104,7 @@ app.post('/api/users/:_id/exercises', async (req, res) => {
   }
 });
 
-// Get logs
+
 app.get('/api/users/:_id/logs', async (req, res) => {
   try {
     const { from, to, limit } = req.query;
