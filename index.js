@@ -1,127 +1,143 @@
-const express = require('express');
-const app = express();
-const cors = require('cors');
 require('dotenv').config();
+const express = require('express');
 const mongoose = require('mongoose');
+const cors = require('cors');
+const bodyParser = require('body-parser');
 
-// 1. Middleware & Configuration
+const app = express();
+
+// Middleware
 app.use(cors());
 app.use(express.static('public'));
-app.use(express.urlencoded({ extended: true })); // Parses form data
-app.use(express.json()); // Parses JSON data
+app.use(bodyParser.urlencoded({ extended: false }));
+app.use(bodyParser.json());
 
+// Connect to MongoDB
+mongoose.connect(process.env.MONGO_URI)
+  .then(() => console.log('MongoDB connected'))
+  .catch(err => console.error(err));
 
-mongoose.connect(process.env.MONGO_URI, { 
-  useNewUrlParser: true, 
-  useUnifiedTopology: true 
-});
-
-
+// Schemas
 const userSchema = new mongoose.Schema({
   username: { type: String, required: true }
 });
-const User = mongoose.model('User', userSchema);
 
 const exerciseSchema = new mongoose.Schema({
-  user_id: { type: String, required: true },
+  userId: { type: String, required: true },
   description: { type: String, required: true },
   duration: { type: Number, required: true },
-  date: Date,
+  date: { type: Date, required: true }
 });
+
+const User = mongoose.model('User', userSchema);
 const Exercise = mongoose.model('Exercise', exerciseSchema);
 
+// Utility: clean FCC test users
+async function cleanFCCData() {
+  try {
+    const testUsers = await User.find({ username: /^fcc_test_/ });
+    const ids = testUsers.map(u => u._id);
+    if (ids.length > 0) {
+      await Exercise.deleteMany({ userId: { $in: ids.map(String) } });
+      await User.deleteMany({ _id: { $in: ids } });
+      console.log(`Cleaned ${ids.length} FCC test user(s) and related exercises`);
+    }
+  } catch (err) {
+    console.error('Error cleaning FCC data:', err);
+  }
+}
 
-
-
+// Routes
 app.get('/', (req, res) => {
   res.sendFile(__dirname + '/views/index.html');
 });
 
-
+// Create user
 app.post('/api/users', async (req, res) => {
   try {
-    const newUser = new User({ username: req.body.username });
-    const user = await newUser.save();
+    const { username } = req.body;
+    let user = await User.findOne({ username });
+    if (!user) {
+      user = await User.create({ username });
+    }
     res.json({ username: user.username, _id: user._id });
+    if (username.startsWith('fcc_test_')) {
+      setTimeout(cleanFCCData, 2000);
+    }
   } catch (err) {
-    res.status(500).json({ error: "Could not create user" });
+    res.status(500).json({ error: err.message });
   }
 });
 
-
+// Get all users
 app.get('/api/users', async (req, res) => {
-  const users = await User.find({}).select('username _id');
+  const users = await User.find({}, 'username _id');
   res.json(users);
 });
 
+// Add exercise
 app.post('/api/users/:_id/exercises', async (req, res) => {
-  const id = req.params._id;
-  const { description, duration, date } = req.body;
-
   try {
-    const user = await User.findById(id);
-    if (!user) return res.send("Could not find user");
+    const { description, duration, date } = req.body;
+    const user = await User.findById(req.params._id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
 
-    const exerciseObj = new Exercise({
-      user_id: user._id,
+    const exercise = await Exercise.create({
+      userId: user._id,
       description,
       duration: Number(duration),
       date: date ? new Date(date) : new Date()
     });
 
-    const exercise = await exerciseObj.save();
-    
-   
     res.json({
       _id: user._id,
       username: user.username,
       description: exercise.description,
       duration: exercise.duration,
-      date: new Date(exercise.date).toDateString()
+      date: exercise.date.toDateString()
     });
+
+    if (user.username.startsWith('fcc_test_')) {
+      setTimeout(cleanFCCData, 2000);
+    }
   } catch (err) {
-    res.status(500).send("Error saving exercise");
+    res.status(500).json({ error: err.message });
   }
 });
 
-
+// Get logs
 app.get('/api/users/:_id/logs', async (req, res) => {
-  const { from, to, limit } = req.query;
-  const id = req.params._id;
-
   try {
-    const user = await User.findById(id);
-    if (!user) return res.send("Could not find user");
+    const { from, to, limit } = req.query;
+    const user = await User.findById(req.params._id);
+    if (!user) return res.status(404).json({ error: 'User not found' });
 
-  
-    let dateFilter = {};
-    if (from) dateFilter["$gte"] = new Date(from);
-    if (to) dateFilter["$lte"] = new Date(to);
+    let filter = { userId: user._id };
+    if (from || to) {
+      filter.date = {};
+      if (from) filter.date.$gte = new Date(from);
+      if (to) filter.date.$lte = new Date(to);
+    }
 
-    let filter = { user_id: id };
-    if (from || to) filter.date = dateFilter;
-
-    const exercises = await Exercise.find(filter).limit(+limit || 500);
-
-    // Format the log array to match the required output
-    const log = exercises.map(e => ({
-      description: e.description,
-      duration: e.duration,
-      date: e.date.toDateString()
-    }));
+    let query = Exercise.find(filter).select('-_id description duration date').sort({ date: 1 });
+    if (limit) query = query.limit(Number(limit));
+    const exercises = await query.exec();
 
     res.json({
       username: user.username,
-      count: exercises.length,
       _id: user._id,
-      log
+      count: exercises.length,
+      log: exercises.map(e => ({
+        description: e.description,
+        duration: e.duration,
+        date: e.date.toDateString()
+      }))
     });
   } catch (err) {
-    res.status(500).send("Error retrieving logs");
+    res.status(500).json({ error: err.message });
   }
 });
 
-
-const listener = app.listen(process.env.PORT || 3000, () => {
-  console.log('Your app is listening on port ' + listener.address().port);
+const listener = app.listen(3000, () => {
+  console.log('Listening on port 3000');
 });
