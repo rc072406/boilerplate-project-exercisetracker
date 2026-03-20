@@ -69,17 +69,19 @@ app.post('/api/users/:_id/exercises', async (req, res) => {
     const user = await User.findById(id);
     if (!user) return res.json({ error: "User not found" });
 
-    // Important: Handle empty string or invalid date inputs
-    const exerciseDate = date ? new Date(date) : new Date();
-    
+    // Fix: Better date handling for empty or null strings
+    let exerciseDate = date ? new Date(date) : new Date();
+    if (exerciseDate.toString() === 'Invalid Date') {
+      exerciseDate = new Date();
+    }
+
     const exercise = await Exercise.create({
       userId: id,
       description,
       duration: parseInt(duration),
-      date: isNaN(exerciseDate.getTime()) ? new Date() : exerciseDate
+      date: exerciseDate
     });
 
-    // The output object must match this exact structure
     res.json({
       _id: user._id,
       username: user.username,
@@ -103,18 +105,16 @@ app.get('/api/users/:_id/logs', async (req, res) => {
 
     let filter = { userId: id };
     
-    // Date filtering logic
+    // Date filtering
     if (from || to) {
       filter.date = {};
       if (from) filter.date.$gte = new Date(from);
       if (to) filter.date.$lte = new Date(to);
     }
 
-    // Execute query with optional limit
-    let query = Exercise.find(filter).limit(parseInt(limit) || 0);
-    const exercises = await query.exec();
+    // Fix: Explicitly cast limit to a number
+    let exercises = await Exercise.find(filter).limit(+limit || 0);
 
-    // Format the log array
     const log = exercises.map(e => ({
       description: e.description,
       duration: e.duration,
@@ -122,9 +122,9 @@ app.get('/api/users/:_id/logs', async (req, res) => {
     }));
 
     res.json({
-      _id: user._id,
       username: user.username,
       count: exercises.length,
+      _id: user._id.toString(), // Fix: Ensure _id is sent as a string
       log: log
     });
   } catch (err) {
